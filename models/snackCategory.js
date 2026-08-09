@@ -1,0 +1,11 @@
+const SNACK_CATEGORIES = [
+  "SWEETS",
+  "CHIPS",
+  "CHAKKULI",
+  "CARBONATED DRINKS",
+  "JUICES",
+  "WATER",
+  "SNACKS"
+];
+
+module.exports = SNACK_CATEGORIES;

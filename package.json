@@ -1,0 +1,24 @@
+{
+  "name": "snacks-delivery-tracker-webapp-backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-async-handler": "^1.2.0",
+    "mongoos": "^0.0.1-security",
+    "mongoose": "^9.9.1",
+    "morgan": "^1.11.0",
+    "winston": "^3.19.0"
+  }
+}
