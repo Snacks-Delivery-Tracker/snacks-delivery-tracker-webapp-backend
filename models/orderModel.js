@@ -18,6 +18,12 @@ const OrderSchema = new Schema({
     type: Date, 
     default: Date.now 
   },
+  entryType: {
+    type: String,
+    enum: ['QUICK', 'ITEMIZED'],
+    default: 'ITEMIZED'
+  },
+  notes: { type: String, trim: true, default: '' },
   items: [OrderItemSchema], // Embedded line items array
   totalAmount: { 
     type: Number, 

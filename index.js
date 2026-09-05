@@ -9,6 +9,7 @@ const shopRoutes = require('./routes/shopRoutes');
 const snackRoutes = require('./routes/snackRoutes');
 const orderRoutes = require('./routes/orderRoutes');
 const paymentRoutes = require('./routes/paymentRoutes');
+const deliveryRoutes = require('./routes/deliveryRoutes');
 
 
 const app = express();
@@ -26,6 +27,7 @@ app.use('/api/shop',shopRoutes);
 app.use('/api/snack',snackRoutes);
 app.use('/api/order',orderRoutes);
 app.use('/api/payment',paymentRoutes);
+app.use('/api/delivery', deliveryRoutes);
 app.use(errorHandler);
 
 app.listen(PORT, () => {

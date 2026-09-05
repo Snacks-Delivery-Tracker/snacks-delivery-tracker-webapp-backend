@@ -27,6 +27,12 @@ const PaymentSchema = new Schema({
     ref: 'Shop', 
     required: true 
   },
+  // The delivery that recorded this collection. Allocations can still settle
+  // older invoices first, but this lets the delivery UI show its own entry.
+  sourceOrderId: {
+    type: Schema.Types.ObjectId,
+    ref: 'orderSchema'
+  },
   amountPaid: { 
     type: Number, 
     required: true, 

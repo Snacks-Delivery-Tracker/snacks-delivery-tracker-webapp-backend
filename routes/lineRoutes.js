@@ -6,6 +6,36 @@ const asyncHandler = require("express-async-handler");
 const validateBody = require("../middlewares/validateBody");
 const Line = require('../models/lineModel');
 
+// List historical lines for the Previous Lines screen.
+router.get('/', async (req, res, next) => {
+  try {
+    const lines = await LineService.listLines();
+    return res.json({ success: true, data: lines });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// The app resumes the currently open delivery route on launch.
+router.get('/current', async (req, res, next) => {
+  try {
+    const line = await LineService.getCurrentLine();
+    return res.json({ success: true, data: line });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Hydrated line with shops, deliveries, snack names, and card totals.
+router.get('/:lineId', async (req, res, next) => {
+  try {
+    const line = await LineService.getLineDetails(req.params.lineId);
+    return res.json({ success: true, data: line });
+  } catch (error) {
+    next(error);
+  }
+});
+
 /**
  * @route   POST /api/lines
  * @desc    Create a new Line
@@ -42,6 +72,35 @@ router.post('/shops', async (req, res) => {
     return res.status(200).json({ success: true, data: updatedLine });
   } catch (error) {
     return res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+router.post('/:lineId/shops', async (req, res, next) => {
+  try {
+    const line = await LineService.addShop(req.params.lineId, req.body.shopId);
+    return res.status(200).json({ success: true, data: line });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete('/:lineId/shops/:shopId', async (req, res, next) => {
+  try {
+    const line = await LineService.removeShop(req.params.lineId, req.params.shopId);
+    return res.status(200).json({ success: true, data: line });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// Permanently delete a delivery line and its visit-scoped deliveries/payments.
+// Shops themselves are intentionally retained in the master shop directory.
+router.delete('/:lineId', async (req, res, next) => {
+  try {
+    const result = await LineService.deleteLine(req.params.lineId);
+    return res.json({ success: true, data: result });
+  } catch (error) {
+    next(error);
   }
 });
 

@@ -1,108 +1,125 @@
-// services/PaymentService.js
-const Payment = require('../models/paymentModel'); // Exported from your PaymentSchema
+const Payment = require('../models/paymentModel');
 const Order = require('../models/orderModel');
-const Shop = require('./shopServies')
-const LineService = require('../services/lineService')
+const Shop = require('../models/shopModel');
+const LineService = require('./lineService');
+
+const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+
 class PaymentService {
   /**
-   * Process a payment for a shop and distribute it across pending orders (Oldest First)
+   * A payment recorded from a line must settle that line's current visit only.
+   * Client-side max attributes are helpful, but this server-side check is the
+   * authoritative guard against a stale screen or a crafted request.
    */
-  async updateOrderPayment(shopId) {
-    const shop = (await Shop.findShopById(shopId))[0];
-    if (!shop) throw new Error('Shop not found');
+  async assertLinePaymentIsWithinBalance(lineId, shopId, amountPaid, existingPaymentAmount = 0) {
+    const amount = roundMoney(amountPaid);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw Object.assign(new Error('Payment amount must be greater than 0'), { status: 400 });
+    }
 
-    // 1. Retrieve ALL payments for this shop with unallocated amounts (FIFO order)
-    const unallocatedPayments = await Payment.find({
-      shopId,
-      unallocatedAmount: { $gt: 0 }
-    }).sort({ paymentDate: 1, createdAt: 1 });
+    const visit = await LineService.getLineVisitBalance(lineId, shopId);
+    const available = roundMoney(visit.pending + Number(existingPaymentAmount || 0));
+    if (amount > available + 0.005) {
+      throw Object.assign(
+        new Error(`Cannot collect more than this line's outstanding amount (₹${available.toFixed(2)})`),
+        { status: 400 }
+      );
+    }
+    return visit;
+  }
 
-    // 2. Retrieve ALL pending orders for this shop (FIFO order)
-    const pendingOrders = await Order.find({
-      shopId,
-      pendingAmount: { $gt: 0 }
-    }).sort({ orderDate: 1, createdAt: 1 });
+  /**
+   * Rebuild allocations deterministically. This is deliberately used after a
+   * delivery is created, edited, or deleted so balances never drift from the
+   * orders and payments stored in MongoDB.
+   */
+  async rebuildShopBalances(shopId) {
+    const [payments, orders] = await Promise.all([
+      Payment.find({ shopId }).sort({ paymentDate: 1, createdAt: 1 }),
+      Order.find({ shopId, deliveryStatus: { $ne: 'CANCELLED' } })
+        .sort({ orderDate: 1, createdAt: 1 })
+    ]);
+
+    for (const order of orders) {
+      order.paidAmount = 0;
+      order.pendingAmount = roundMoney(order.totalPayableAmount || 0);
+      order.paymentStatus = order.pendingAmount === 0 ? 'PAID' : 'NOT_PAID';
+    }
 
     let orderIndex = 0;
+    for (const payment of payments) {
+      let remaining = roundMoney(payment.amountPaid);
+      payment.allocations = [];
 
-    // 3. Iterate through each payment document with unallocated money
-    for (const payment of unallocatedPayments) {
-      if (orderIndex >= pendingOrders.length) break; // All orders fully settled
+      while (remaining > 0 && orderIndex < orders.length) {
+        const order = orders[orderIndex];
+        const allocation = Math.min(remaining, order.pendingAmount);
 
-      while (payment.unallocatedAmount > 0 && orderIndex < pendingOrders.length) {
-        const order = pendingOrders[orderIndex];
-
-        // Determine allocation amount for this specific order
-        const allocation = Math.min(payment.unallocatedAmount, order.pendingAmount);
-
-        // Update Payment document's unallocated amount and allocations array
-        payment.unallocatedAmount -= allocation;
-        payment.allocations.push({
-          orderId: order._id,
-          allocatedAmount: allocation
-        });
-
-        // Update Order document's financials
-        order.paidAmount = (order.paidAmount || 0) + allocation;
-        order.pendingAmount = Math.max(0, order.totalPayableAmount - order.paidAmount);
-
-        if (order.pendingAmount === 0) {
-          order.paymentStatus = 'PAID';
-          orderIndex++; // Move to next order once current is fully paid
-        } else {
-          order.paymentStatus = 'PARTIAL';
+        if (allocation > 0) {
+          payment.allocations.push({ orderId: order._id, allocatedAmount: allocation });
+          order.paidAmount = roundMoney(order.paidAmount + allocation);
+          order.pendingAmount = roundMoney(order.totalPayableAmount - order.paidAmount);
+          order.paymentStatus = order.pendingAmount === 0 ? 'PAID' : 'PARTIAL';
+          remaining = roundMoney(remaining - allocation);
         }
+
+        if (order.pendingAmount <= 0) orderIndex += 1;
       }
 
-      // Save updated payment record
-      payment.unallocatedAmount = Number(payment.unallocatedAmount.toFixed(2))
-      payment.unallocatedAmount = Number(payment.unallocatedAmount.toFixed(2))
+      payment.unallocatedAmount = remaining;
       await payment.save();
     }
 
-    // 4. Save all updated order documents
-    for (const order of pendingOrders) {
-      if (order.isModified()) {
-        await order.save();
-      }
-    }
+    await Promise.all(orders.map((order) => order.save()));
 
-    // 5. Synchronize Shop balances
-    const remainingUnallocatedPayments = await Payment.find({ shopId, unallocatedAmount: { $gt: 0 } });
-    shop.creditBalance = remainingUnallocatedPayments.reduce((sum, p) => sum + p.unallocatedAmount, 0);
+    const outstanding = orders.reduce((sum, order) => sum + order.pendingAmount, 0);
+    const credit = payments.reduce((sum, payment) => sum + payment.unallocatedAmount, 0);
+    const shop = await Shop.findByIdAndUpdate(
+      shopId,
+      {
+        totalOutstandingBalance: roundMoney(outstanding),
+        creditBalance: roundMoney(credit)
+      },
+      { new: true, runValidators: true }
+    );
 
-    const remainingPendingOrders = await Order.find({ shopId, pendingAmount: { $gt: 0 } });
-    shop.totalOutstandingBalance = remainingPendingOrders.reduce((sum, o) => sum + o.pendingAmount, 0);
+    if (!shop) throw new Error('Shop not found');
 
-    console.log(shop.creditBalance)
-    console.log(shop.totalOutstandingBalance)
-    await Shop.updateShop(shopId,shop);
     return {
       shopBalances: {
         creditBalance: shop.creditBalance,
         totalOutstandingBalance: shop.totalOutstandingBalance
       },
-      remainingUnallocatedPaymentsCount: remainingUnallocatedPayments.length,
-      remainingPendingOrdersCount: remainingPendingOrders.length
+      remainingUnallocatedPaymentsCount: payments.filter((payment) => payment.unallocatedAmount > 0).length,
+      remainingPendingOrdersCount: orders.filter((order) => order.pendingAmount > 0).length
     };
   }
 
-  /**
-   * Processes a newly received payment and triggers FIFO settlement.
-   */
+  // Kept as the existing service's public method for compatibility.
+  async updateOrderPayment(shopId) {
+    return this.rebuildShopBalances(shopId);
+  }
+
   async processShopPayment(paymentData) {
-    const {lineId, shopId, amountPaid, paymentMode, transactionRef, notes, paymentDate } = paymentData;
+    const {
+      lineId,
+      shopId,
+      sourceOrderId,
+      amountPaid,
+      paymentMode = 'CASH',
+      transactionRef,
+      notes,
+      paymentDate
+    } = paymentData;
 
-    if (!amountPaid || amountPaid <= 0) {
-      throw new Error('Payment amount must be greater than 0');
-    }
+    await this.assertLinePaymentIsWithinBalance(lineId, shopId, amountPaid);
 
-    // 1. Save new Payment record with full amount initially unallocated
     const payment = await Payment.create({
       lineId,
       shopId,
-      amountPaid,
-      unallocatedAmount: amountPaid,
+      sourceOrderId,
+      amountPaid: roundMoney(amountPaid),
+      unallocatedAmount: roundMoney(amountPaid),
       allocations: [],
       paymentMode,
       transactionRef,
@@ -110,26 +127,18 @@ class PaymentService {
       paymentDate: paymentDate || new Date()
     });
 
-    // 2. Run FIFO settlement for this shop
-    const settlementSummary = await this.updateOrderPayment(shopId);
+    const settlementSummary = await this.rebuildShopBalances(shopId);
+    await LineService.addPayment(lineId, shopId, payment._id, payment.amountPaid);
 
-    LineService.addPayment(payment.lineId,payment.shopId,payment._id,payment.amountPaid)
-
-    return {
-      success: true,
-      paymentId: payment._id,
-      ...settlementSummary
-    };
+    return { success: true, paymentId: payment._id, ...settlementSummary };
   }
 
-  // Fetch all payment history for a specific shop
   async getPaymentsByShop(shopId) {
-    return await Payment.find({ shopId }).sort({ paymentDate: -1 });
+    return Payment.find({ shopId }).sort({ paymentDate: -1, createdAt: -1 });
   }
 
-  // Fetch all payment history across system
   async getAllPayments() {
-    return await Payment.find().populate('shopId', 'name ownerName').sort({ paymentDate: -1 });
+    return Payment.find().populate('shopId', 'name ownerName').sort({ paymentDate: -1 });
   }
 }
 

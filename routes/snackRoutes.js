@@ -42,7 +42,7 @@ router.post("/",
 }));
 
 // Get all
-router.get("/", validateBody([],[]),asyncHandler(async (req, res) => {
+router.get("/", asyncHandler(async (req, res) => {
     const snacks = await findAllSnacks();
     res.json(snacks);
 }));

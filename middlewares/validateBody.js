@@ -2,7 +2,7 @@ const IllegalArgumentsError = require("../utils/exceptions/IllegalArgumentsError
 
 function validateBody(requiredFields, allowedFields) {
   return (req, res, next) => {
-    const body = req.body;
+    const body = req.body || {};
 
     // Check required fields
     for (const field of requiredFields) {
