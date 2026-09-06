@@ -16,7 +16,32 @@ dotenv.config();
 const PORT = process.env.PORT || 3001;
 connectDb(process.env.MongoDbUrl);
 
-app.use(cors());
+// Configure CORS to support specific allowed origins and credentials
+const allowedOrigins = process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(",").map((o) => o.trim())
+    : null;
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        // Allow requests with no origin (e.g., mobile apps, curl)
+        if (!origin) return callback(null, true);
+        if (!allowedOrigins) return callback(null, true); // allow all if not configured
+        if (allowedOrigins.indexOf(origin) !== -1) return callback(null, true);
+        return callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "Accept",
+        "Origin",
+        "X-Requested-With",
+    ],
+    credentials: true,
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(express.json());
 app.use(morgan("dev"));
 
