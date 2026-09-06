@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const PaymentService = require('../services/PaymentService');
+const PaymentService = require('../services/paymentService');
 
 // POST /api/payments/process - Pay pending orders using a lump sum
 router.post('/process', async (req, res, next) => {
