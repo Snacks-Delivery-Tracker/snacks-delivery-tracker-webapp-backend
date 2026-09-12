@@ -48,6 +48,19 @@ async function findShopsByName(shopName){
     return shops;
 }
 
+async function findShopsByWeekday(weekday) {
+    logger.debug({
+          "source":{"file":"shopServies","method":"findShopsByWeekday"},
+          "req":weekday
+    })
+    const shops = await ShopModel.find({deliveryWeekday: weekday},{})
+    logger.debug({
+          "source":{"file":"shopServies","method":"findShopsByWeekday"},
+          "res":shops
+    })
+    return shops;
+}
+
 async function updateShop(id, shopData) {
     logger.debug({
           "source":{"file":"shopServies","method":"updateShop"},
@@ -76,6 +89,7 @@ module.exports = {
     createShop,
     findShopById,
     findShopsByName,
+    findShopsByWeekday,
     updateShop,
     deleteShop,
 }

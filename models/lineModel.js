@@ -24,6 +24,8 @@ const ShopLineSummarySchema = new Schema({
 
 const LineSchema = new Schema({
   lineName: { type: String, required: true },
+  lineType: { type: String, enum: ['DEFAULT', 'WEEKDAY'], default: 'DEFAULT' },
+  weekday: { type: String, default: '' },
   status: { type: String, enum: ['OPEN', 'CLOSED'], default: 'OPEN' },
   deliveryDate: { type: Date, default: Date.now, index: true },
   startTime: Date,

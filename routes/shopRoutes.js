@@ -9,6 +9,7 @@ const {
   createShop,
   findShopById,
   findShopsByName,
+  findShopsByWeekday,
   updateShop,
   deleteShop
 } = require('../services/shopServies');
@@ -23,6 +24,12 @@ routes.get('/', asyncHandler(async (req, res) => {
     ] }
     : {};
   const shops = await ShopModel.find(filter).sort({ name: 1 }).limit(100);
+  res.json({ success: true, data: shops });
+}));
+
+// Get shops by weekday — must be BEFORE /:shopId to avoid being caught by the param route
+routes.get('/by-weekday/:weekday', asyncHandler(async (req, res) => {
+  const shops = await findShopsByWeekday(req.params.weekday);
   res.json({ success: true, data: shops });
 }));
 
@@ -51,7 +58,7 @@ routes.delete('/:shopId', asyncHandler(async (req, res) => {
 routes.post('/',
   validateBody(
     ["name", "ownerName", "ownerNumber", "address"],
-    ["lineId", "name", "ownerName", "ownerNumber", "ownerEmail", "contactName", "contactNumber", "address"]
+    ["lineId", "name", "ownerName", "ownerNumber", "ownerEmail", "contactName", "contactNumber", "address", "deliveryWeekday"]
   ),
   asyncHandler(async (req, res) => {
     logger.debug({

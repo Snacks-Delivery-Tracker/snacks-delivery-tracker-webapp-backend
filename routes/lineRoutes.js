@@ -42,13 +42,13 @@ router.get('/:lineId', async (req, res, next) => {
  */
 router.post('/', async (req, res) => {
   try {
-    const { lineName, deliveryDate } = req.body;
+    const { lineName, deliveryDate, lineType, weekday } = req.body;
 
     if (!lineName) {
       return res.status(400).json({ error: 'lineName is required' });
     }
 
-    const line = await LineService.createLine(lineName, deliveryDate);
+    const line = await LineService.createLine(lineName, deliveryDate, lineType, weekday);
     return res.status(201).json({ success: true, data: line });
   } catch (error) {
     return res.status(500).json({ success: false, error: error.message });
@@ -78,6 +78,18 @@ router.post('/shops', async (req, res) => {
 router.post('/:lineId/shops', async (req, res, next) => {
   try {
     const line = await LineService.addShop(req.params.lineId, req.body.shopId);
+    return res.status(200).json({ success: true, data: line });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post('/:lineId/shops/bulk', async (req, res, next) => {
+  try {
+    if (!Array.isArray(req.body.shopIds)) {
+      return res.status(400).json({ error: 'shopIds array is required' });
+    }
+    const line = await LineService.bulkAddShops(req.params.lineId, req.body.shopIds);
     return res.status(200).json({ success: true, data: line });
   } catch (error) {
     next(error);

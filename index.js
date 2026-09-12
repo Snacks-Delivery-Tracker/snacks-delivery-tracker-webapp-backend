@@ -1,6 +1,8 @@
+const dotenv = require("dotenv");
+dotenv.config();
+
 const express = require("express");
 const cors = require("cors");
-const dotenv = require("dotenv");
 const morgan = require("morgan");
 const { connectDb } = require("./utils/connect_db");
 const errorHandler = require("./middlewares/errorHandler");
@@ -12,7 +14,6 @@ const paymentRoutes = require("./routes/paymentRoutes");
 const deliveryRoutes = require("./routes/deliveryRoutes");
 
 const app = express();
-dotenv.config();
 const PORT = process.env.PORT || 3001;
 connectDb(process.env.MongoDbUrl);
 
@@ -41,8 +42,22 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-// Use a "/*" pattern for preflight to avoid path-to-regexp parsing errors
-app.options("/*", cors(corsOptions));
+// Fallback CORS headers middleware: ensures preflight responses include required headers.
+// This is intentionally simple and can be removed once CORS is verified working in your deployment.
+app.use((req, res, next) => {
+    const origin = req.headers.origin;
+    if (origin && (!allowedOrigins || allowedOrigins.indexOf(origin) !== -1)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+    } else if (!origin) {
+        res.setHeader('Access-Control-Allow-Origin', '*');
+    }
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, Accept, Origin, X-Requested-With');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
+    if (req.method === 'OPTIONS') return res.status(204).end();
+    next();
+});
+
 app.use(express.json());
 app.use(morgan("dev"));
 
@@ -60,3 +75,5 @@ app.use(errorHandler);
 app.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
+
+module.exports = app;

@@ -48,7 +48,7 @@ const PaymentSchema = new Schema({
   allocations: [AllocationSchema],
   paymentMode: { 
     type: String, 
-    enum: ['CASH', 'UPI', 'CHEQUE', 'BANK_TRANSFER'], 
+    enum: ['CASH', 'UPI', 'CARD', 'CHEQUE', 'BANK_TRANSFER'], 
     required: true 
   },
   paymentDate: { 

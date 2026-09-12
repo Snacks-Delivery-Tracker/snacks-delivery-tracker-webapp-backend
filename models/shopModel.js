@@ -35,6 +35,11 @@ const ShopSchema = new Schema({
     type: String, 
     required: true 
   },
+  deliveryWeekday: {
+    type: String,
+    enum: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', ''],
+    default: ''
+  },
   // Total pending money owed by the shop across all unpaid orders
   totalOutstandingBalance: { 
     type: Number, 

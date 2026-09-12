@@ -9,9 +9,11 @@ class LineService {
   /**
    * 1. Create a new line
    */
-  async createLine(lineName, deliveryDate = null) {
+  async createLine(lineName, deliveryDate = null, lineType = 'DEFAULT', weekday = '') {
     const line = await Line.create({
       lineName,
+      lineType,
+      weekday,
       deliveryDate: deliveryDate || new Date(),
       status: 'OPEN',
       shops: [],
@@ -59,6 +61,44 @@ class LineService {
     line.totalCashCollected = line.shops.reduce((sum, s) => sum + s.paymentsCollected, 0);
 
     await line.save();
+    return line;
+  }
+
+  /**
+   * Bulk add multiple shops to a line (e.g. for weekday auto-loading)
+   */
+  async bulkAddShops(lineId, shopIds) {
+    const line = await Line.findById(lineId);
+    if (!line) throw new Error('Line not found');
+    if (line.status !== 'OPEN') throw new Error('A closed line cannot be changed');
+
+    const shops = await Shop.find({ _id: { $in: shopIds } });
+    if (shops.length === 0) return line;
+
+    const existingShopIds = new Set(line.shops.map((s) => s.shopId.toString()));
+    
+    let addedAny = false;
+    for (const shop of shops) {
+      if (!existingShopIds.has(shop._id.toString())) {
+        line.shops.push({
+          shopId: shop._id,
+          startingOutstanding: shop.totalOutstandingBalance || 0,
+          startingCredit: shop.creditBalance || 0,
+          ordersDeliveredAmount: 0,
+          paymentsCollected: 0,
+          orderIds: [],
+          paymentIds: []
+        });
+        addedAny = true;
+      }
+    }
+
+    if (addedAny) {
+      line.totalGoodsDelivered = line.shops.reduce((sum, s) => sum + s.ordersDeliveredAmount, 0);
+      line.totalCashCollected = line.shops.reduce((sum, s) => sum + s.paymentsCollected, 0);
+      await line.save();
+    }
+    
     return line;
   }
 
@@ -348,6 +388,7 @@ class LineService {
     const shopMap       = new Map(shops.map((shop) => [String(shop._id), shop]));
     const ordersByShop  = new Map();
     const collectedByShop = new Map();
+    const paymentBreakdownByShop = new Map();
 
     // Build per-shop order list scoped to this visit's orderIds
     for (const order of orders) {
@@ -357,10 +398,15 @@ class LineService {
       ordersByShop.set(shopId, list);
     }
 
-    // Sum payments scoped to this visit's paymentIds only
+    // Sum payments scoped to this visit's paymentIds only, and build breakdown
     for (const payment of payments) {
       const shopId = String(payment.shopId);
       collectedByShop.set(shopId, (collectedByShop.get(shopId) || 0) + (payment.amountPaid || 0));
+      
+      const breakdown = paymentBreakdownByShop.get(shopId) || { CASH: 0, UPI: 0, CARD: 0, CHEQUE: 0, BANK_TRANSFER: 0 };
+      const mode = payment.paymentMode || 'CASH';
+      breakdown[mode] += (payment.amountPaid || 0);
+      paymentBreakdownByShop.set(shopId, breakdown);
     }
 
     const detailedShops = line.shops.map((summary) => {
@@ -375,7 +421,8 @@ class LineService {
         latestOrder: shopOrders[0] || null,
         totalAmount,
         collectedAmount,
-        pendingAmount: Math.max(0, totalAmount - collectedAmount)
+        pendingAmount: Math.max(0, totalAmount - collectedAmount),
+        paymentBreakdown: paymentBreakdownByShop.get(shopId) || { CASH: 0, UPI: 0, CARD: 0, CHEQUE: 0, BANK_TRANSFER: 0 }
       };
     }).filter((shop) => shop._id);
 
