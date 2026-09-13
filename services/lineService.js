@@ -203,18 +203,60 @@ class LineService {
     if (!line) throw new Error('Line not found');
     if (line.status === 'CLOSED') throw new Error('Line already closed');
 
-    for (const shopLineSummary of line.shops) {
-      const shop = await Shop.findById(shopLineSummary.shopId);
+    // 1. Fully hydrate the line details BEFORE closing it
+    const hydratedLine = await this.getLineDetails(lineId);
+
+    // 2. Update shop lifetime stats & ending balances
+    for (const shopData of hydratedLine.shops) {
+      const shop = await Shop.findById(shopData._id);
       if (shop) {
+        shop.lifetimeBilled = roundMoney((shop.lifetimeBilled || 0) + shopData.totalAmount);
+        shop.lifetimeReceived = roundMoney((shop.lifetimeReceived || 0) + shopData.collectedAmount);
+        await shop.save();
+      }
+      // find the summary in the original line doc
+      const shopLineSummary = line.shops.find(s => String(s.shopId) === String(shopData._id));
+      if (shopLineSummary && shop) {
         shopLineSummary.endingOutstanding = shop.totalOutstandingBalance;
         shopLineSummary.endingCredit = shop.creditBalance;
       }
     }
 
+    // 3. Save the snapshot and close
     line.status = 'CLOSED';
     line.endTime = new Date();
+    
+    // We update the hydratedLine with the ending balances just calculated
+    for (const shopLineSummary of line.shops) {
+      const hdShop = hydratedLine.shops.find(s => String(s._id) === String(shopLineSummary.shopId));
+      if (hdShop) {
+        hdShop.lineSummary.endingOutstanding = shopLineSummary.endingOutstanding;
+        hdShop.lineSummary.endingCredit = shopLineSummary.endingCredit;
+      }
+    }
+    
+    hydratedLine.status = 'CLOSED';
+    hydratedLine.endTime = line.endTime;
+    line.billSnapshot = hydratedLine;
+
+    // 4. Gather all Order and Payment IDs to delete
+    const orderIdsToDelete = line.shops.flatMap((summary) => summary.orderIds || []);
+    const paymentIdsToDelete = line.shops.flatMap((summary) => summary.paymentIds || []);
+
+    // 5. Clear the arrays on the line document to save space
+    for (const summary of line.shops) {
+      summary.orderIds = [];
+      summary.paymentIds = [];
+    }
+
     await line.save();
-    return line;
+
+    // 6. Delete the Orders and Payments (without returning stock)
+    if (paymentIdsToDelete.length) await Payment.deleteMany({ _id: { $in: paymentIdsToDelete } });
+    if (orderIdsToDelete.length) await Order.deleteMany({ _id: { $in: orderIdsToDelete } });
+
+    // The line.save() might not return the full populated details, so we can return the hydrated one
+    return hydratedLine;
   }
 
   /**
@@ -363,6 +405,10 @@ class LineService {
     const line = await Line.findById(lineId).lean();
     if (!line) throw new Error('Line not found');
 
+    if (line.status === 'CLOSED' && line.billSnapshot) {
+      return line.billSnapshot;
+    }
+
     const shopIds = line.shops.map((entry) => entry.shopId);
 
     // Use the per-shop orderIds / paymentIds stored on the Line document as the
@@ -389,6 +435,7 @@ class LineService {
     const ordersByShop  = new Map();
     const collectedByShop = new Map();
     const paymentBreakdownByShop = new Map();
+    const paymentsByShop = new Map();
 
     // Build per-shop order list scoped to this visit's orderIds
     for (const order of orders) {
@@ -407,6 +454,10 @@ class LineService {
       const mode = payment.paymentMode || 'CASH';
       breakdown[mode] += (payment.amountPaid || 0);
       paymentBreakdownByShop.set(shopId, breakdown);
+      
+      const pList = paymentsByShop.get(shopId) || [];
+      pList.push(payment);
+      paymentsByShop.set(shopId, pList);
     }
 
     const detailedShops = line.shops.map((summary) => {
@@ -422,7 +473,8 @@ class LineService {
         totalAmount,
         collectedAmount,
         pendingAmount: Math.max(0, totalAmount - collectedAmount),
-        paymentBreakdown: paymentBreakdownByShop.get(shopId) || { CASH: 0, UPI: 0, CARD: 0, CHEQUE: 0, BANK_TRANSFER: 0 }
+        paymentBreakdown: paymentBreakdownByShop.get(shopId) || { CASH: 0, UPI: 0, CARD: 0, CHEQUE: 0, BANK_TRANSFER: 0 },
+        payments: paymentsByShop.get(shopId) || []
       };
     }).filter((shop) => shop._id);
 
@@ -438,6 +490,49 @@ class LineService {
         collectedAmount,
         pendingAmount: Math.max(0, totalAmount - collectedAmount)
       }
+    };
+  }
+
+  async getShopBillFromSnapshot(lineId, shopId) {
+    const line = await Line.findById(lineId).lean();
+    if (!line) throw new Error('Line not found');
+    if (line.status !== 'CLOSED' || !line.billSnapshot) {
+      throw new Error('This route is only available for closed lines');
+    }
+
+    const shopData = line.billSnapshot.shops.find((s) => String(s._id) === String(shopId));
+    if (!shopData) throw new Error('Shop not found in this line');
+
+    const order = shopData.latestOrder;
+    if (!order) throw new Error('No delivery recorded for this shop in this line');
+
+    let payments = shopData.payments || [];
+    if (!payments.length) {
+      // Fallback for older snapshots that only saved the breakdown
+      for (const [mode, amount] of Object.entries(shopData.paymentBreakdown || {})) {
+        if (amount > 0) {
+          payments.push({
+            paymentMode: mode,
+            amountPaid: amount,
+            paymentDate: line.endTime
+          });
+        }
+      }
+    }
+
+    return {
+      ...order,
+      shopId: {
+        _id: shopData._id,
+        name: shopData.name,
+        ownerName: shopData.ownerName,
+        ownerNumber: shopData.ownerNumber,
+        address: shopData.address
+      },
+      collectedAmount: shopData.collectedAmount,
+      deliveryPendingAmount: shopData.pendingAmount,
+      collectionPayments: payments,
+      paymentBreakdown: shopData.paymentBreakdown
     };
   }
 }

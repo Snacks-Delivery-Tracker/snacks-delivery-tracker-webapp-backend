@@ -53,6 +53,17 @@ const ShopSchema = new Schema({
     default: 0, 
     min: 0,
     set: round2 
+  },
+  // Lifetime stats for cost optimization / analytics
+  lifetimeBilled: {
+    type: Number,
+    default: 0,
+    set: round2
+  },
+  lifetimeReceived: {
+    type: Number,
+    default: 0,
+    set: round2
   }
 }, { timestamps: true });
 
