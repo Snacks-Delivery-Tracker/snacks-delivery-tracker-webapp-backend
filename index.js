@@ -15,7 +15,16 @@ const deliveryRoutes = require("./routes/deliveryRoutes");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-connectDb(process.env.MongoDbUrl);
+
+// Vercel serverless: Await the database connection before handling any requests
+app.use(async (req, res, next) => {
+    try {
+        await connectDb(process.env.MongoDbUrl);
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
 
 // Configure CORS to support specific allowed origins and credentials
 const allowedOrigins = process.env.ALLOWED_ORIGINS
