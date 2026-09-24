@@ -78,13 +78,32 @@ class DeliveryService {
       .lean();
     if (!order) throw inputError('Delivery not found', 404);
 
-    const payments = await Payment.find({ sourceOrderId: order._id }).sort({ paymentDate: -1 }).lean();
-    const collectedAmount = roundMoney(payments.reduce((sum, payment) => sum + payment.amountPaid, 0));
+    const line = await Line.findById(order.lineId).lean();
+    let paymentIds = [];
+    if (line && line.shops) {
+      const orderShopIdStr = order.shopId && order.shopId._id ? String(order.shopId._id) : String(order.shopId);
+      const summary = line.shops.find((s) => String(s.shopId) === orderShopIdStr);
+      if (summary && summary.paymentIds) {
+        paymentIds = summary.paymentIds;
+      }
+    }
+
+    const payments = await Payment.find({ _id: { $in: paymentIds } }).sort({ paymentDate: -1 }).lean();
+    
+    const paymentBreakdown = { CASH: 0, UPI: 0, CARD: 0, CHEQUE: 0, BANK_TRANSFER: 0 };
+    let collectedAmount = 0;
+    for (const payment of payments) {
+      collectedAmount = roundMoney(collectedAmount + payment.amountPaid);
+      const mode = payment.paymentMode || 'CASH';
+      paymentBreakdown[mode] = roundMoney((paymentBreakdown[mode] || 0) + payment.amountPaid);
+    }
+    
     return {
       ...order,
       collectedAmount,
       deliveryPendingAmount: Math.max(0, roundMoney(order.totalPayableAmount - collectedAmount)),
-      collectionPayments: payments
+      collectionPayments: payments,
+      paymentBreakdown
     };
   }
 
@@ -246,11 +265,20 @@ class DeliveryService {
   }
 
   async getShopHistory(shopId) {
-    const [shop, payments] = await Promise.all([
+    const [shop, payments, orders] = await Promise.all([
       Shop.findById(shopId).lean(),
-      Payment.find({ shopId }).sort({ paymentDate: -1, createdAt: -1 }).lean()
+      Payment.find({ shopId }).sort({ paymentDate: -1, createdAt: -1 }).lean(),
+      Order.find({ shopId, deliveryStatus: { $ne: 'CANCELLED' } }).lean()
     ]);
     if (!shop) throw inputError('Shop not found', 404);
+
+    const activeBilled = orders.reduce((sum, order) => sum + (order.totalPayableAmount || 0), 0);
+    const activeReceived = payments.reduce((sum, payment) => sum + (payment.amountPaid || 0), 0);
+
+    shop.activeBilled = roundMoney(activeBilled);
+    shop.activeReceived = roundMoney(activeReceived);
+    shop.activePending = Math.max(0, roundMoney(activeBilled - activeReceived));
+
     return { shop, payments };
   }
 }

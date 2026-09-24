@@ -72,18 +72,19 @@ class PaymentService {
 
     await Promise.all(orders.map((order) => order.save()));
 
-    const outstanding = orders.reduce((sum, order) => sum + order.pendingAmount, 0);
-    const credit = payments.reduce((sum, payment) => sum + payment.unallocatedAmount, 0);
-    const shop = await Shop.findByIdAndUpdate(
-      shopId,
-      {
-        totalOutstandingBalance: roundMoney(outstanding),
-        creditBalance: roundMoney(credit)
-      },
-      { new: true, runValidators: true }
-    );
+    const activeBilled = orders.reduce((sum, order) => sum + order.totalPayableAmount, 0);
+    const activeReceived = payments.reduce((sum, payment) => sum + payment.amountPaid, 0);
 
+    const shop = await Shop.findById(shopId);
     if (!shop) throw new Error('Shop not found');
+    
+    const totalBilled = roundMoney((shop.lifetimeBilled || 0) + activeBilled);
+    const totalReceived = roundMoney((shop.lifetimeReceived || 0) + activeReceived);
+    const netBalance = roundMoney(totalBilled - totalReceived);
+
+    shop.totalOutstandingBalance = netBalance > 0 ? netBalance : 0;
+    shop.creditBalance = netBalance < 0 ? -netBalance : 0;
+    await shop.save({ runValidators: true });
 
     return {
       shopBalances: {

@@ -36,6 +36,16 @@ router.get('/:lineId', async (req, res, next) => {
   }
 });
 
+// Get shop bill from a closed line snapshot
+router.get('/:lineId/shop-bill/:shopId', async (req, res, next) => {
+  try {
+    const bill = await LineService.getShopBillFromSnapshot(req.params.lineId, req.params.shopId);
+    return res.json({ success: true, data: bill });
+  } catch (error) {
+    next(error);
+  }
+});
+
 /**
  * @route   POST /api/lines
  * @desc    Create a new Line
