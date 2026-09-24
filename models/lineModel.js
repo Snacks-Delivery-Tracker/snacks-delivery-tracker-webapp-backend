@@ -36,7 +36,10 @@ const LineSchema = new Schema({
 
   // Line Totals (Calculated automatically when line is closed)
   totalCashCollected: { type: Number, set: round2, default: 0 },
-  totalGoodsDelivered: { type: Number, set: round2, default: 0 }
+  totalGoodsDelivered: { type: Number, set: round2, default: 0 },
+  
+  // Snapshot for closed lines to avoid needing Orders/Payments documents
+  billSnapshot: { type: Object }
 }, { timestamps: true });
 
 module.exports = model('Line', LineSchema);
